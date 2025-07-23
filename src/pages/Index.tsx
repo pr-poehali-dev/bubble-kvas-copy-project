@@ -31,6 +31,10 @@ const BubbleKvas = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 });
+  
+  // Система пасов
+  const [passes, setPasses] = useState(3); // Начальное количество пасов
+  const [maxPasses] = useState(5); // Максимальное количество пасов
 
   const colors = [
     'bg-gradient-to-br from-orange-400 to-orange-600', // #FF6B35
@@ -186,15 +190,36 @@ const BubbleKvas = () => {
     setBubblesPopped(prev => prev + bubblesRemoved);
   };
 
+  // Использование паса
+  const usePass = () => {
+    if (passes <= 0) return;
+    
+    setPasses(prev => prev - 1);
+    localStorage.setItem('bubbleKvasPasses', (passes - 1).toString());
+    
+    // Генерируем новое расположение пузырей
+    generateBubbles();
+  };
+
+  // Восстановление паса за достижения
+  const rewardPass = () => {
+    if (passes >= maxPasses) return;
+    
+    setPasses(prev => Math.min(prev + 1, maxPasses));
+    localStorage.setItem('bubbleKvasPasses', Math.min(passes + 1, maxPasses).toString());
+  };
+
   // Загрузка сохраненных данных
   useEffect(() => {
     const savedBestScore = localStorage.getItem('bubbleKvasBestScore');
     const savedEndlessScore = localStorage.getItem('bubbleKvasEndlessScore');
     const savedUnlockedLevels = localStorage.getItem('bubbleKvasUnlockedLevels');
+    const savedPasses = localStorage.getItem('bubbleKvasPasses');
     
     if (savedBestScore) setBestScore(parseInt(savedBestScore));
     if (savedEndlessScore) setEndlessScore(parseInt(savedEndlessScore));
     if (savedUnlockedLevels) setUnlockedLevels(parseInt(savedUnlockedLevels));
+    if (savedPasses) setPasses(parseInt(savedPasses));
   }, []);
 
   // Сохранение рекордов
@@ -209,7 +234,7 @@ const BubbleKvas = () => {
     }
   }, [score, bestScore, endlessScore, gameMode]);
 
-  // Проверка завершения уровня
+  // Проверка завершения уровня и награды
   useEffect(() => {
     if (gameMode === 'level' && bubbles.length === 0 && bubblesPopped > 0) {
       // Разблокировка следующего уровня
@@ -217,9 +242,27 @@ const BubbleKvas = () => {
         const newUnlockedLevels = currentLevel + 1;
         setUnlockedLevels(newUnlockedLevels);
         localStorage.setItem('bubbleKvasUnlockedLevels', newUnlockedLevels.toString());
+        
+        // Награда пасом за прохождение нового уровня
+        if (currentLevel % 3 === 0) { // Каждый 3-й уровень
+          rewardPass();
+        }
       }
     }
   }, [bubbles.length, bubblesPopped, currentLevel, unlockedLevels, gameMode]);
+
+  // Награда пасом за достижения в бесконечном режиме
+  useEffect(() => {
+    if (gameMode === 'endless' && score > 0) {
+      // Каждые 1000 очков в бесконечном режиме
+      const milestones = Math.floor(score / 1000);
+      const prevMilestones = Math.floor((score - 10) / 1000);
+      
+      if (milestones > prevMilestones) {
+        rewardPass();
+      }
+    }
+  }, [score, gameMode]);
 
   // Начало игры
   const startGame = (mode: 'level' | 'endless', level?: number) => {
@@ -274,6 +317,8 @@ const BubbleKvas = () => {
           <p>✨ Мультицвет: убирает все одного цвета (+50)</p>
           <p>⚡ Молния: убирает вертикальную линию (+75)</p>
           <p className="text-blue-600 font-semibold">👆 Перемещайте игровое поле мышью или пальцем!</p>
+          <p className="text-green-600 font-semibold">🔄 Пасы: перегенерируют расположение пузырей</p>
+          <p className="text-orange-500 text-xs">Получайте пасы: каждый 3-й уровень или 1000 очков в бесконечном режиме</p>
         </div>
       </Card>
     </div>
@@ -324,11 +369,15 @@ const BubbleKvas = () => {
         </div>
 
         <Card className="p-4 bg-white/90 backdrop-blur-sm border-0">
-          <div className="text-center">
+          <div className="text-center space-y-2">
             <p className="text-sm text-gray-600 mb-2">Прогресс</p>
             <div className="flex justify-between text-sm">
               <span>Пройдено: {unlockedLevels - 1}/20</span>
               <span>Лучший счет: {bestScore}</span>
+            </div>
+            <div className="flex justify-center items-center gap-2 pt-2 border-t">
+              <Icon name="RotateCcw" size={16} className="text-green-500" />
+              <span className="text-sm font-semibold text-green-600">Пасы: {passes}/{maxPasses}</span>
             </div>
           </div>
         </Card>
@@ -350,7 +399,7 @@ const BubbleKvas = () => {
           Меню
         </Button>
         
-        <div className="flex gap-2 text-sm">
+        <div className="flex gap-2 text-sm flex-wrap">
           <Badge className="bg-white/90 text-gray-800 px-3 py-1 font-bold">
             <Icon name="Star" size={14} className="mr-1" />
             {score}
@@ -370,7 +419,27 @@ const BubbleKvas = () => {
             <Icon name="Trophy" size={14} className="mr-1" />
             {gameMode === 'level' ? bestScore : endlessScore}
           </Badge>
+          <Badge className="bg-green-400/90 text-white px-3 py-1 font-bold">
+            <Icon name="RotateCcw" size={14} className="mr-1" />
+            {passes}
+          </Badge>
         </div>
+      </div>
+
+      {/* Кнопка использования паса */}
+      <div className="flex justify-center mb-4">
+        <Button
+          onClick={usePass}
+          disabled={passes <= 0}
+          className={`px-6 py-2 rounded-full font-semibold shadow-lg transform transition-all duration-200 ${
+            passes > 0 
+              ? 'bg-gradient-to-r from-green-400 to-green-500 hover:from-green-500 hover:to-green-600 text-white hover:scale-105' 
+              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+          }`}
+        >
+          <Icon name="RotateCcw" size={16} className="mr-2" />
+          Использовать пас ({passes})
+        </Button>
       </div>
 
       {/* Игровое поле */}
@@ -486,8 +555,14 @@ const BubbleKvas = () => {
             <p className="text-2xl font-bold">{unlockedLevels - 1}/20</p>
           </div>
           
+          <div className="bg-gradient-to-r from-green-400 to-emerald-500 p-4 rounded-xl text-white">
+            <p className="text-sm opacity-90">Пасы</p>
+            <p className="text-2xl font-bold">{passes}/{maxPasses}</p>
+            <p className="text-xs opacity-75 mt-1">Награды за достижения</p>
+          </div>
+          
           {score > 0 && (
-            <div className="bg-gradient-to-r from-green-400 to-emerald-500 p-4 rounded-xl text-white">
+            <div className="bg-gradient-to-r from-gray-400 to-gray-500 p-4 rounded-xl text-white">
               <p className="text-sm opacity-90">Текущий счет</p>
               <p className="text-2xl font-bold">{score}</p>
             </div>
