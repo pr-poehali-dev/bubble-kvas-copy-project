@@ -25,6 +25,12 @@ const BubbleKvas = () => {
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [selectedBubbles, setSelectedBubbles] = useState<string[]>([]);
   const [bubblesPopped, setBubblesPopped] = useState(0);
+  
+  // Состояние для перемещения камеры
+  const [cameraOffset, setCameraOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 });
 
   const colors = [
     'bg-gradient-to-br from-orange-400 to-orange-600', // #FF6B35
@@ -39,6 +45,57 @@ const BubbleKvas = () => {
     bomb: { color: 'bg-gradient-to-br from-red-500 to-red-700', icon: 'Bomb' },
     multicolor: { color: 'bg-gradient-to-br from-indigo-400 via-purple-500 to-pink-500', icon: 'Sparkles' },
     lightning: { color: 'bg-gradient-to-br from-yellow-300 to-yellow-500', icon: 'Zap' }
+  };
+
+  // Обработчики перемещения камеры
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setLastPanPoint(cameraOffset);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    
+    const deltaX = e.clientX - dragStart.x;
+    const deltaY = e.clientY - dragStart.y;
+    
+    setCameraOffset({
+      x: Math.max(-200, Math.min(200, lastPanPoint.x + deltaX)),
+      y: Math.max(-200, Math.min(200, lastPanPoint.y + deltaY))
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  // Touch события для мобильных устройств
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      setIsDragging(true);
+      setDragStart({ x: touch.clientX, y: touch.clientY });
+      setLastPanPoint(cameraOffset);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging || e.touches.length !== 1) return;
+    
+    e.preventDefault();
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - dragStart.x;
+    const deltaY = touch.clientY - dragStart.y;
+    
+    setCameraOffset({
+      x: Math.max(-200, Math.min(200, lastPanPoint.x + deltaX)),
+      y: Math.max(-200, Math.min(200, lastPanPoint.y + deltaY))
+    });
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
   };
 
   // Генерация пузырьков по уровню
@@ -58,6 +115,7 @@ const BubbleKvas = () => {
       specialChance = Math.min(0.08 + difficulty * 0.01, 0.15);
     }
     
+    // Генерируем пузыри в большем пространстве для перемещения камеры
     for (let i = 0; i < bubbleCount; i++) {
       const isSpecial = Math.random() < specialChance;
       const specialTypes = Object.keys(specialBubbleTypes) as (keyof typeof specialBubbleTypes)[];
@@ -65,8 +123,8 @@ const BubbleKvas = () => {
       
       newBubbles.push({
         id: `bubble-${i}`,
-        x: Math.random() * 300,
-        y: Math.random() * 400,
+        x: Math.random() * 700, // Увеличиваем игровое пространство
+        y: Math.random() * 800,
         color: isSpecial 
           ? specialBubbleTypes[specialType!].color
           : colors[Math.floor(Math.random() * colors.length)],
@@ -77,6 +135,7 @@ const BubbleKvas = () => {
     }
     setBubbles(newBubbles);
     setBubblesPopped(0);
+    setCameraOffset({ x: 0, y: 0 }); // Сброс позиции камеры
   }, [gameMode, currentLevel, score]);
 
   // Обработка клика по пузырю
@@ -209,11 +268,12 @@ const BubbleKvas = () => {
           </Button>
         </div>
         
-        <div className="mt-6 text-sm text-gray-500">
+        <div className="mt-6 text-sm text-gray-500 space-y-1">
           <p>🎯 Лопай обычные пузыри: +10 очков</p>
           <p>💣 Бомба: взрывает соседние (+100)</p>
           <p>✨ Мультицвет: убирает все одного цвета (+50)</p>
           <p>⚡ Молния: убирает вертикальную линию (+75)</p>
+          <p className="text-blue-600 font-semibold">👆 Перемещайте игровое поле мышью или пальцем!</p>
         </div>
       </Card>
     </div>
@@ -314,28 +374,53 @@ const BubbleKvas = () => {
       </div>
 
       {/* Игровое поле */}
-      <div className="relative w-full max-w-md mx-auto h-96 bg-white/20 backdrop-blur-sm rounded-3xl border border-white/30 overflow-hidden">
-        {bubbles.map((bubble) => (
-          <div
-            key={bubble.id}
-            onClick={() => handleBubbleClick(bubble.id)}
-            className={`absolute cursor-pointer rounded-full ${bubble.color} shadow-lg transform hover:scale-110 transition-all duration-200 flex items-center justify-center animate-pulse`}
-            style={{
-              left: `${bubble.x}px`,
-              top: `${bubble.y}px`,
-              width: `${bubble.size}px`,
-              height: `${bubble.size}px`,
-            }}
-          >
-            {bubble.isSpecial && (
-              <Icon 
-                name={specialBubbleTypes[bubble.specialType!].icon as any} 
-                size={bubble.size * 0.4} 
-                className="text-white drop-shadow-lg" 
-              />
-            )}
-          </div>
-        ))}
+      <div 
+        className="relative w-full max-w-md mx-auto h-96 bg-white/20 backdrop-blur-sm rounded-3xl border border-white/30 overflow-hidden select-none"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      >
+        <div 
+          className="absolute inset-0 transition-transform duration-100"
+          style={{
+            transform: `translate(${cameraOffset.x}px, ${cameraOffset.y}px)`,
+            width: '700px',
+            height: '800px',
+            left: '-200px',
+            top: '-200px'
+          }}
+        >
+          {bubbles.map((bubble) => (
+            <div
+              key={bubble.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!isDragging) handleBubbleClick(bubble.id);
+              }}
+              className={`absolute cursor-pointer rounded-full ${bubble.color} shadow-lg transform hover:scale-110 transition-all duration-200 flex items-center justify-center animate-pulse`}
+              style={{
+                left: `${bubble.x}px`,
+                top: `${bubble.y}px`,
+                width: `${bubble.size}px`,
+                height: `${bubble.size}px`,
+                pointerEvents: isDragging ? 'none' : 'auto'
+              }}
+            >
+              {bubble.isSpecial && (
+                <Icon 
+                  name={specialBubbleTypes[bubble.specialType!].icon as any} 
+                  size={bubble.size * 0.4} 
+                  className="text-white drop-shadow-lg" 
+                />
+              )}
+            </div>
+          ))}
+        </div>
         
         {bubbles.length === 0 && bubblesPopped > 0 && (
           <div className="absolute inset-0 flex items-center justify-center">
