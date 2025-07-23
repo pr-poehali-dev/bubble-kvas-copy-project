@@ -15,11 +15,16 @@ interface Bubble {
 }
 
 const BubbleKvas = () => {
-  const [gameState, setGameState] = useState<'menu' | 'playing' | 'records'>('menu');
+  const [gameState, setGameState] = useState<'menu' | 'levels' | 'playing' | 'records'>('menu');
+  const [gameMode, setGameMode] = useState<'level' | 'endless'>('level');
+  const [currentLevel, setCurrentLevel] = useState(1);
+  const [unlockedLevels, setUnlockedLevels] = useState(1);
   const [score, setScore] = useState(0);
   const [bestScore, setBestScore] = useState(0);
+  const [endlessScore, setEndlessScore] = useState(0);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [selectedBubbles, setSelectedBubbles] = useState<string[]>([]);
+  const [bubblesPopped, setBubblesPopped] = useState(0);
 
   const colors = [
     'bg-gradient-to-br from-orange-400 to-orange-600', // #FF6B35
@@ -36,11 +41,25 @@ const BubbleKvas = () => {
     lightning: { color: 'bg-gradient-to-br from-yellow-300 to-yellow-500', icon: 'Zap' }
   };
 
-  // Генерация случайных пузырьков
+  // Генерация пузырьков по уровню
   const generateBubbles = useCallback(() => {
     const newBubbles: Bubble[] = [];
-    for (let i = 0; i < 60; i++) {
-      const isSpecial = Math.random() < 0.1; // 10% шанс специального пузыря
+    let bubbleCount = 60;
+    let specialChance = 0.1;
+    
+    if (gameMode === 'level') {
+      // Прогрессия сложности по уровням
+      bubbleCount = Math.min(40 + currentLevel * 5, 80);
+      specialChance = Math.min(0.05 + currentLevel * 0.02, 0.2);
+    } else {
+      // Бесконечный режим - увеличение сложности по очкам
+      const difficulty = Math.floor(score / 500);
+      bubbleCount = Math.min(50 + difficulty * 3, 90);
+      specialChance = Math.min(0.08 + difficulty * 0.01, 0.15);
+    }
+    
+    for (let i = 0; i < bubbleCount; i++) {
+      const isSpecial = Math.random() < specialChance;
       const specialTypes = Object.keys(specialBubbleTypes) as (keyof typeof specialBubbleTypes)[];
       const specialType = isSpecial ? specialTypes[Math.floor(Math.random() * specialTypes.length)] : undefined;
       
@@ -57,13 +76,16 @@ const BubbleKvas = () => {
       });
     }
     setBubbles(newBubbles);
-  }, []);
+    setBubblesPopped(0);
+  }, [gameMode, currentLevel, score]);
 
   // Обработка клика по пузырю
   const handleBubbleClick = (bubbleId: string) => {
     const bubble = bubbles.find(b => b.id === bubbleId);
     if (!bubble) return;
 
+    let bubblesRemoved = 1;
+    
     if (bubble.isSpecial) {
       // Обработка специальных пузырей
       let bonusPoints = 0;
@@ -71,6 +93,10 @@ const BubbleKvas = () => {
         case 'bomb':
           bonusPoints = 100;
           // Взрыв соседних пузырей
+          const nearbyBubbles = bubbles.filter(b => 
+            Math.abs(b.x - bubble.x) <= 60 && Math.abs(b.y - bubble.y) <= 60
+          );
+          bubblesRemoved = nearbyBubbles.length;
           setBubbles(prev => prev.filter(b => 
             Math.abs(b.x - bubble.x) > 60 || Math.abs(b.y - bubble.y) > 60
           ));
@@ -79,11 +105,15 @@ const BubbleKvas = () => {
           bonusPoints = 50;
           // Удаляет все пузыри одного случайного цвета
           const targetColor = colors[Math.floor(Math.random() * colors.length)];
+          const colorBubbles = bubbles.filter(b => b.color === targetColor);
+          bubblesRemoved = colorBubbles.length;
           setBubbles(prev => prev.filter(b => b.color !== targetColor));
           break;
         case 'lightning':
           bonusPoints = 75;
           // Удаляет вертикальную линию пузырей
+          const lineBubbles = bubbles.filter(b => Math.abs(b.x - bubble.x) <= 30);
+          bubblesRemoved = lineBubbles.length;
           setBubbles(prev => prev.filter(b => Math.abs(b.x - bubble.x) > 30));
           break;
       }
@@ -93,24 +123,49 @@ const BubbleKvas = () => {
       setBubbles(prev => prev.filter(b => b.id !== bubbleId));
       setScore(prev => prev + 10);
     }
+    
+    setBubblesPopped(prev => prev + bubblesRemoved);
   };
 
-  // Загрузка лучшего счета
+  // Загрузка сохраненных данных
   useEffect(() => {
-    const saved = localStorage.getItem('bubbleKvasBestScore');
-    if (saved) setBestScore(parseInt(saved));
+    const savedBestScore = localStorage.getItem('bubbleKvasBestScore');
+    const savedEndlessScore = localStorage.getItem('bubbleKvasEndlessScore');
+    const savedUnlockedLevels = localStorage.getItem('bubbleKvasUnlockedLevels');
+    
+    if (savedBestScore) setBestScore(parseInt(savedBestScore));
+    if (savedEndlessScore) setEndlessScore(parseInt(savedEndlessScore));
+    if (savedUnlockedLevels) setUnlockedLevels(parseInt(savedUnlockedLevels));
   }, []);
 
-  // Сохранение рекорда
+  // Сохранение рекордов
   useEffect(() => {
-    if (score > bestScore) {
+    if (gameMode === 'level' && score > bestScore) {
       setBestScore(score);
       localStorage.setItem('bubbleKvasBestScore', score.toString());
     }
-  }, [score, bestScore]);
+    if (gameMode === 'endless' && score > endlessScore) {
+      setEndlessScore(score);
+      localStorage.setItem('bubbleKvasEndlessScore', score.toString());
+    }
+  }, [score, bestScore, endlessScore, gameMode]);
+
+  // Проверка завершения уровня
+  useEffect(() => {
+    if (gameMode === 'level' && bubbles.length === 0 && bubblesPopped > 0) {
+      // Разблокировка следующего уровня
+      if (currentLevel >= unlockedLevels) {
+        const newUnlockedLevels = currentLevel + 1;
+        setUnlockedLevels(newUnlockedLevels);
+        localStorage.setItem('bubbleKvasUnlockedLevels', newUnlockedLevels.toString());
+      }
+    }
+  }, [bubbles.length, bubblesPopped, currentLevel, unlockedLevels, gameMode]);
 
   // Начало игры
-  const startGame = () => {
+  const startGame = (mode: 'level' | 'endless', level?: number) => {
+    setGameMode(mode);
+    if (level) setCurrentLevel(level);
     setGameState('playing');
     setScore(0);
     generateBubbles();
@@ -129,17 +184,25 @@ const BubbleKvas = () => {
         
         <div className="space-y-4">
           <Button 
-            onClick={startGame}
+            onClick={() => setGameState('levels')}
             className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-semibold py-3 rounded-full shadow-lg transform hover:scale-105 transition-all duration-200"
           >
-            <Icon name="Play" size={20} className="mr-2" />
-            Начать игру
+            <Icon name="Map" size={20} className="mr-2" />
+            Уровни
+          </Button>
+          
+          <Button 
+            onClick={() => startGame('endless')}
+            className="w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-semibold py-3 rounded-full shadow-lg transform hover:scale-105 transition-all duration-200"
+          >
+            <Icon name="Infinity" size={20} className="mr-2" />
+            Бесконечный режим
           </Button>
           
           <Button 
             onClick={() => setGameState('records')}
             variant="outline"
-            className="w-full border-2 border-purple-400 text-purple-600 hover:bg-purple-50 font-semibold py-3 rounded-full"
+            className="w-full border-2 border-cyan-400 text-cyan-600 hover:bg-cyan-50 font-semibold py-3 rounded-full"
           >
             <Icon name="Trophy" size={20} className="mr-2" />
             Рекорды
@@ -153,6 +216,63 @@ const BubbleKvas = () => {
           <p>⚡ Молния: убирает вертикальную линию (+75)</p>
         </div>
       </Card>
+    </div>
+  );
+
+  // Экран выбора уровней
+  const renderLevels = () => (
+    <div className="min-h-screen bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 p-4">
+      <div className="max-w-md mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <Button 
+            onClick={() => setGameState('menu')} 
+            variant="outline" 
+            className="bg-white/80 backdrop-blur-sm border-0"
+          >
+            <Icon name="ArrowLeft" size={16} className="mr-2" />
+            Назад
+          </Button>
+          <h2 className="text-2xl font-bold text-white">Уровни</h2>
+          <div></div>
+        </div>
+
+        <div className="grid grid-cols-4 gap-3 mb-6">
+          {Array.from({ length: 20 }, (_, i) => i + 1).map((level) => {
+            const isUnlocked = level <= unlockedLevels;
+            const isCompleted = level < unlockedLevels;
+            
+            return (
+              <Button
+                key={level}
+                onClick={() => isUnlocked ? startGame('level', level) : null}
+                disabled={!isUnlocked}
+                className={`aspect-square text-lg font-bold relative ${
+                  isCompleted 
+                    ? 'bg-gradient-to-br from-green-400 to-green-500 text-white shadow-lg' 
+                    : isUnlocked
+                      ? 'bg-gradient-to-br from-orange-400 to-orange-500 text-white shadow-lg hover:scale-105'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                } transition-all duration-200`}
+              >
+                {isCompleted && (
+                  <Icon name="Check" size={12} className="absolute top-1 right-1" />
+                )}
+                {level}
+              </Button>
+            );
+          })}
+        </div>
+
+        <Card className="p-4 bg-white/90 backdrop-blur-sm border-0">
+          <div className="text-center">
+            <p className="text-sm text-gray-600 mb-2">Прогресс</p>
+            <div className="flex justify-between text-sm">
+              <span>Пройдено: {unlockedLevels - 1}/20</span>
+              <span>Лучший счет: {bestScore}</span>
+            </div>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 
@@ -170,14 +290,25 @@ const BubbleKvas = () => {
           Меню
         </Button>
         
-        <div className="flex gap-4">
-          <Badge className="bg-white/90 text-gray-800 px-4 py-2 text-lg font-bold">
-            <Icon name="Star" size={16} className="mr-1" />
+        <div className="flex gap-2 text-sm">
+          <Badge className="bg-white/90 text-gray-800 px-3 py-1 font-bold">
+            <Icon name="Star" size={14} className="mr-1" />
             {score}
           </Badge>
-          <Badge className="bg-yellow-400/90 text-gray-800 px-4 py-2 text-lg font-bold">
-            <Icon name="Trophy" size={16} className="mr-1" />
-            {bestScore}
+          {gameMode === 'level' && (
+            <Badge className="bg-blue-400/90 text-white px-3 py-1 font-bold">
+              Уровень {currentLevel}
+            </Badge>
+          )}
+          {gameMode === 'endless' && (
+            <Badge className="bg-purple-400/90 text-white px-3 py-1 font-bold">
+              <Icon name="Infinity" size={14} className="mr-1" />
+              Бесконечный
+            </Badge>
+          )}
+          <Badge className="bg-yellow-400/90 text-gray-800 px-3 py-1 font-bold">
+            <Icon name="Trophy" size={14} className="mr-1" />
+            {gameMode === 'level' ? bestScore : endlessScore}
           </Badge>
         </div>
       </div>
@@ -206,17 +337,38 @@ const BubbleKvas = () => {
           </div>
         ))}
         
-        {bubbles.length === 0 && (
+        {bubbles.length === 0 && bubblesPopped > 0 && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center text-white">
               <Icon name="CheckCircle" size={48} className="mx-auto mb-2" />
-              <p className="text-xl font-bold">Молодец!</p>
-              <Button 
-                onClick={generateBubbles}
-                className="mt-4 bg-white/20 backdrop-blur-sm border border-white/30 text-white hover:bg-white/30"
-              >
-                Следующий уровень
-              </Button>
+              <p className="text-xl font-bold">
+                {gameMode === 'level' ? 'Уровень пройден!' : 'Отлично!'}
+              </p>
+              {gameMode === 'level' ? (
+                <div className="space-y-2">
+                  <Button 
+                    onClick={() => startGame('level', currentLevel + 1)}
+                    disabled={currentLevel >= 20}
+                    className="mt-4 bg-white/20 backdrop-blur-sm border border-white/30 text-white hover:bg-white/30"
+                  >
+                    {currentLevel >= 20 ? 'Все уровни пройдены!' : 'Следующий уровень'}
+                  </Button>
+                  <Button 
+                    onClick={() => setGameState('levels')}
+                    variant="outline"
+                    className="bg-white/10 border-white/30 text-white hover:bg-white/20"
+                  >
+                    Выбрать уровень
+                  </Button>
+                </div>
+              ) : (
+                <Button 
+                  onClick={generateBubbles}
+                  className="mt-4 bg-white/20 backdrop-blur-sm border border-white/30 text-white hover:bg-white/30"
+                >
+                  Продолжить
+                </Button>
+              )}
             </div>
           </div>
         )}
@@ -235,14 +387,26 @@ const BubbleKvas = () => {
         
         <div className="space-y-4">
           <div className="bg-gradient-to-r from-yellow-400 to-orange-500 p-4 rounded-xl text-white">
-            <p className="text-sm opacity-90">Лучший результат</p>
+            <p className="text-sm opacity-90">Уровни - лучший результат</p>
             <p className="text-3xl font-bold">{bestScore}</p>
           </div>
           
-          <div className="bg-gradient-to-r from-blue-400 to-purple-500 p-4 rounded-xl text-white">
-            <p className="text-sm opacity-90">Текущий счет</p>
-            <p className="text-2xl font-bold">{score}</p>
+          <div className="bg-gradient-to-r from-purple-400 to-pink-500 p-4 rounded-xl text-white">
+            <p className="text-sm opacity-90">Бесконечный режим</p>
+            <p className="text-2xl font-bold">{endlessScore}</p>
           </div>
+          
+          <div className="bg-gradient-to-r from-blue-400 to-cyan-500 p-4 rounded-xl text-white">
+            <p className="text-sm opacity-90">Пройдено уровней</p>
+            <p className="text-2xl font-bold">{unlockedLevels - 1}/20</p>
+          </div>
+          
+          {score > 0 && (
+            <div className="bg-gradient-to-r from-green-400 to-emerald-500 p-4 rounded-xl text-white">
+              <p className="text-sm opacity-90">Текущий счет</p>
+              <p className="text-2xl font-bold">{score}</p>
+            </div>
+          )}
         </div>
         
         <Button 
@@ -259,6 +423,7 @@ const BubbleKvas = () => {
   return (
     <div className="font-[Rubik]">
       {gameState === 'menu' && renderMenu()}
+      {gameState === 'levels' && renderLevels()}
       {gameState === 'playing' && renderGame()}
       {gameState === 'records' && renderRecords()}
     </div>
